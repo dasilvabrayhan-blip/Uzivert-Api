@@ -1,9 +1,42 @@
 const express = require('express');
+const fs = require('fs');
 const app = express();
 
-// Almacenamiento en memoria (se borra si el server se reinicia)
-const usuarios = {};
-const usuariosTotal = new Set();
+const ARCHIVO_DATOS = 'datos.json';
+
+// Cargar datos al arrancar
+let usuarios = {};
+let usuariosTotal = [];
+
+function cargarDatos() {
+    try {
+        if (fs.existsSync(ARCHIVO_DATOS)) {
+            const contenido = fs.readFileSync(ARCHIVO_DATOS, 'utf8');
+            const data = JSON.parse(contenido);
+            usuarios = data.usuarios || {};
+            usuariosTotal = data.usuariosTotal || [];
+            console.log(`✅ Datos cargados: ${usuariosTotal.length} usuarios totales`);
+        } else {
+            console.log('📝 Archivo nuevo, arrancando de cero');
+        }
+    } catch (e) {
+        console.log('❌ Error cargando datos: ' + e.message);
+    }
+}
+
+function guardarDatos() {
+    try {
+        const data = {
+            usuarios: usuarios,
+            usuariosTotal: usuariosTotal
+        };
+        fs.writeFileSync(ARCHIVO_DATOS, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+        console.log('❌ Error guardando datos: ' + e.message);
+    }
+}
+
+cargarDatos();
 
 app.get('/', (req, res) => {
     const ahora = Date.now();
@@ -26,12 +59,11 @@ app.get('/', (req, res) => {
     res.json({
         activos: activosAhora,
         hoy: usuariosHoy.size,
-        total: usuariosTotal.size,
+        total: usuariosTotal.length,
         actualizado: new Date().toLocaleTimeString('es-AR')
     });
 });
 
-// Endpoint que llama el script cada vez que alguien lo ejecuta
 app.get('/registrar', (req, res) => {
     const nombre = req.query.user || 'Anonimo';
     const ahora = Date.now();
@@ -47,13 +79,16 @@ app.get('/registrar', (req, res) => {
     } else {
         usuarios[nombre].ultimoPing = ahora;
         
-        // Si es un día nuevo
         if (usuarios[nombre].primerPingHoy < inicioHoy.getTime()) {
             usuarios[nombre].primerPingHoy = ahora;
         }
     }
     
-    usuariosTotal.add(nombre);
+    if (!usuariosTotal.includes(nombre)) {
+        usuariosTotal.push(nombre);
+    }
+    
+    guardarDatos();
     
     res.json({ ok: true });
 });
