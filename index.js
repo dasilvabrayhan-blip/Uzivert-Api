@@ -40,7 +40,7 @@ cargarDatos();
 
 app.get('/', (req, res) => {
     const ahora = Date.now();
-    const cincoMin = 5 * 60 * 1000;
+    const unaHora = 60 * 60 * 1000;
     
     let activosAhora = 0;
     const usuariosHoy = new Set();
@@ -48,7 +48,7 @@ app.get('/', (req, res) => {
     inicioHoy.setHours(0, 0, 0, 0);
     
     for (const [nombre, datos] of Object.entries(usuarios)) {
-        if (ahora - datos.ultimoPing < cincoMin) {
+        if (ahora - datos.ultimoPing < unaHora) {
             activosAhora++;
         }
         if (datos.primerPingHoy > inicioHoy.getTime()) {
