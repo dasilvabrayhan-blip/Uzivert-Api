@@ -1,130 +1,98 @@
 const express = require('express');
-const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
 const app = express();
 
-// ═══════════════════════════════════════
-// CONFIG SUPABASE
-// ═══════════════════════════════════════
-const SUPABASE_URL = "https://apxnkrztnvirkgkuxfy.supabase.co";
-const SUPABASE_KEY = "sb_publishable_XMVoLklKUy1VW2m_payNDQ_kXPeCiQd";
+const ARCHIVO_DATOS = 'datos.json';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+let usuarios = {};
+let usuariosTotal = [];
 
-// ═══════════════════════════════════════
-// ENDPOINT PRINCIPAL (contador)
-// ═══════════════════════════════════════
-app.get('/', async (req, res) => {
+function cargarDatos() {
     try {
-        const ahora = Date.now();
-        const unaHora = 60 * 60 * 1000;
-        
-        const { data: todos, error } = await supabase
-            .from('usuarios')
-            .select('*');
-        
-        if (error) {
-            return res.json({
-                activos: 0,
-                hoy: 0,
-                total: 0,
-                actualizado: new Date().toLocaleTimeString('es-AR'),
-                error: "SELECT: " + error.message
-            });
+        if (fs.existsSync(ARCHIVO_DATOS)) {
+            const contenido = fs.readFileSync(ARCHIVO_DATOS, 'utf8');
+            const data = JSON.parse(contenido);
+            usuarios = data.usuarios || {};
+            usuariosTotal = data.usuariosTotal || [];
+            console.log(`✅ Datos cargados: ${usuariosTotal.length} usuarios totales`);
+        } else {
+            console.log('📝 Archivo nuevo, arrancando de cero');
         }
-        
-        let activosAhora = 0;
-        const usuariosHoy = new Set();
-        const inicioHoy = new Date();
-        inicioHoy.setHours(0, 0, 0, 0);
-        
-        for (const usuario of todos) {
-            if (ahora - usuario.ultimo_ping < unaHora) {
-                activosAhora++;
-            }
-            if (usuario.primer_ping_hoy > inicioHoy.getTime()) {
-                usuariosHoy.add(usuario.nombre);
-            }
-        }
-        
-        res.json({
-            activos: activosAhora,
-            hoy: usuariosHoy.size,
-            total: todos.length,
-            actualizado: new Date().toLocaleTimeString('es-AR')
-        });
     } catch (e) {
-        res.json({
-            activos: 0,
-            hoy: 0,
-            total: 0,
-            actualizado: new Date().toLocaleTimeString('es-AR'),
-            error: "CATCH: " + e.message
-        });
+        console.log('❌ Error cargando datos: ' + e.message);
     }
+}
+
+function guardarDatos() {
+    try {
+        const data = {
+            usuarios: usuarios,
+            usuariosTotal: usuariosTotal
+        };
+        fs.writeFileSync(ARCHIVO_DATOS, JSON.stringify(data, null, 2), 'utf8');
+    } catch (e) {
+        console.log('❌ Error guardando datos: ' + e.message);
+    }
+}
+
+cargarDatos();
+
+app.get('/', (req, res) => {
+    const ahora = Date.now();
+    const unaHora = 60 * 60 * 1000;
+    
+    let activosAhora = 0;
+    const usuariosHoy = new Set();
+    const inicioHoy = new Date();
+    inicioHoy.setHours(0, 0, 0, 0);
+    
+    for (const [nombre, datos] of Object.entries(usuarios)) {
+        if (ahora - datos.ultimoPing < unaHora) {
+            activosAhora++;
+        }
+        if (datos.primerPingHoy > inicioHoy.getTime()) {
+            usuariosHoy.add(nombre);
+        }
+    }
+    
+    res.json({
+        activos: activosAhora,
+        hoy: usuariosHoy.size,
+        total: usuariosTotal.length,
+        actualizado: new Date().toLocaleTimeString('es-AR')
+    });
 });
 
-// ═══════════════════════════════════════
-// ENDPOINT /registrar (el hub pingea acá)
-// ═══════════════════════════════════════
-app.get('/registrar', async (req, res) => {
-    try {
-        const nombre = req.query.user || 'Anonimo';
-        const ahora = Date.now();
-        const inicioHoy = new Date();
-        inicioHoy.setHours(0, 0, 0, 0);
+app.get('/registrar', (req, res) => {
+    const nombre = req.query.user || 'Anonimo';
+    const ahora = Date.now();
+    const inicioHoy = new Date();
+    inicioHoy.setHours(0, 0, 0, 0);
+    
+    if (!usuarios[nombre]) {
+        usuarios[nombre] = {
+            primerPing: ahora,
+            primerPingHoy: ahora,
+            ultimoPing: ahora
+        };
+    } else {
+        usuarios[nombre].ultimoPing = ahora;
         
-        // Buscar si el usuario ya existe
-        const { data: existente, error: errSelect } = await supabase
-            .from('usuarios')
-            .select('*')
-            .eq('nombre', nombre)
-            .maybeSingle();
-        
-        if (errSelect) {
-            return res.json({ ok: false, error: "SELECT: " + errSelect.message });
+        if (usuarios[nombre].primerPingHoy < inicioHoy.getTime()) {
+            usuarios[nombre].primerPingHoy = ahora;
         }
-        
-        if (existente) {
-            // Actualizar
-            let primerPingHoy = existente.primer_ping_hoy;
-            if (primerPingHoy < inicioHoy.getTime()) {
-                primerPingHoy = ahora;
-            }
-            
-            const { error: errUpdate } = await supabase
-                .from('usuarios')
-                .update({
-                    ultimo_ping: ahora,
-                    primer_ping_hoy: primerPingHoy
-                })
-                .eq('nombre', nombre);
-            
-            if (errUpdate) {
-                return res.json({ ok: false, error: "UPDATE: " + errUpdate.message });
-            }
-        } else {
-            // Insertar nuevo
-            const { error: errInsert } = await supabase
-                .from('usuarios')
-                .insert({
-                    nombre: nombre,
-                    primer_ping: ahora,
-                    primer_ping_hoy: ahora,
-                    ultimo_ping: ahora
-                });
-            
-            if (errInsert) {
-                return res.json({ ok: false, error: "INSERT: " + errInsert.message });
-            }
-        }
-        
-        res.json({ ok: true });
-    } catch (e) {
-        res.json({ ok: false, error: "CATCH: " + e.message });
     }
+    
+    if (!usuariosTotal.includes(nombre)) {
+        usuariosTotal.push(nombre);
+    }
+    
+    guardarDatos();
+    
+    res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🎃 Uzivert API escuchando en puerto ${PORT}`);
 });
