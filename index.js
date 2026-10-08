@@ -28,7 +28,7 @@ app.get('/', async (req, res) => {
                 hoy: 0,
                 total: 0,
                 actualizado: new Date().toLocaleTimeString('es-AR'),
-                error: error.message
+                error: "SELECT: " + error.message
             });
         }
         
@@ -58,7 +58,7 @@ app.get('/', async (req, res) => {
             hoy: 0,
             total: 0,
             actualizado: new Date().toLocaleTimeString('es-AR'),
-            error: e.message
+            error: "CATCH: " + e.message
         });
     }
 });
@@ -73,30 +73,38 @@ app.get('/registrar', async (req, res) => {
         const inicioHoy = new Date();
         inicioHoy.setHours(0, 0, 0, 0);
         
-        // Verificar si el usuario existe
-        const { data: existente } = await supabase
+        // Buscar si el usuario ya existe
+        const { data: existente, error: errSelect } = await supabase
             .from('usuarios')
             .select('*')
             .eq('nombre', nombre)
-            .single();
+            .maybeSingle();
+        
+        if (errSelect) {
+            return res.json({ ok: false, error: "SELECT: " + errSelect.message });
+        }
         
         if (existente) {
-            // Actualizar ultimo_ping
+            // Actualizar
             let primerPingHoy = existente.primer_ping_hoy;
             if (primerPingHoy < inicioHoy.getTime()) {
                 primerPingHoy = ahora;
             }
             
-            await supabase
+            const { error: errUpdate } = await supabase
                 .from('usuarios')
                 .update({
                     ultimo_ping: ahora,
                     primer_ping_hoy: primerPingHoy
                 })
                 .eq('nombre', nombre);
+            
+            if (errUpdate) {
+                return res.json({ ok: false, error: "UPDATE: " + errUpdate.message });
+            }
         } else {
-            // Crear nuevo
-            await supabase
+            // Insertar nuevo
+            const { error: errInsert } = await supabase
                 .from('usuarios')
                 .insert({
                     nombre: nombre,
@@ -104,11 +112,15 @@ app.get('/registrar', async (req, res) => {
                     primer_ping_hoy: ahora,
                     ultimo_ping: ahora
                 });
+            
+            if (errInsert) {
+                return res.json({ ok: false, error: "INSERT: " + errInsert.message });
+            }
         }
         
         res.json({ ok: true });
     } catch (e) {
-        res.json({ ok: false, error: e.message });
+        res.json({ ok: false, error: "CATCH: " + e.message });
     }
 });
 
